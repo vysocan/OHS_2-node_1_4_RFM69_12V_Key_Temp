@@ -27,10 +27,9 @@
 #define PING_DELAY      1200000 // In milliseconds, 20 minutes
 #define SENSOR_DELAY    600000  // In milliseconds, 10 minutes
 // Constants
-#define REG_LEN         21   // Size of one conf. element
+#define REG_LEN         21   // Size of one conf. element, defined in gateway
 #define NODE_NAME_SIZE  16   // As defined in gateway
-#define RADIO_REPEAT    5    // Repeat sending
-#define KEY_DELAY_ARMED 600  // Send key delay, for other then disarmed mode, allows faster disarm. 
+#define KEY_DELAY_ARMED 400  // Send key delay, for other then disarmed mode, allows faster disarm. 
 #define KEY_DELAY       1400 // Send key delay, for disarmed mode
 // Pins
 #define LED_GREEN       5    // iButton probe LED
@@ -39,10 +38,11 @@
 // Radio
 #define NETWORKID       100  // Do not change, defined in gateway
 #define GATEWAYID       1    // Do not change gateway address
-#define NODEID          3    // This is our address 
+#define NODEID          2    // This is our address 
+#define RADIO_REPEAT    5    // Repeat sending
 #define FREQUENCY       RF69_868MHZ // Match this with the version of your gateway (others: RF69_433MHZ, RF69_915MHZ)
 #define KEY             "ABCDABCDABCDABCD" // Has to be same 16 characters/bytes on all nodes, not more not less!
-#define ENABLE_ATC      // Comment out this line to disable AUTO TRANSMISSION CONTROL
+//#define ENABLE_ATC      // Comment out this line to disable AUTO TRANSMISSION CONTROL
 #define ATC_RSSI        -75
 #ifdef ENABLE_ATC 
   RFM69_ATC radio;
@@ -91,9 +91,10 @@ union u_tag {
   byte  b[4]; 
   float fval;
 } u;
-
-// Registration
-void send_conf(){ 
+/*
+ * Registration
+ */
+void sendConf(){ 
   int8_t result;
   Serial.print(F("Conf:"));
   // Wait some time to avoid contention
@@ -114,7 +115,9 @@ void send_conf(){
     tone(SPEAKER, notes[7]);  delay(100); tone(SPEAKER, notes[0]);  delay(100); noTone(SPEAKER);
   }
 }
-// Set defaults on first time
+/*
+ * Set defaults on first time
+ */
 void setDefault(){
   conf.version = VERSION;   // Change VERSION to take effect
   conf.reg[0+(REG_LEN*0)]  = 'K';       // Key
@@ -131,7 +134,9 @@ void setDefault(){
   memset(&conf.reg[5+(REG_LEN*1)], 0, NODE_NAME_SIZE);
   strcpy(&conf.reg[5+(REG_LEN*1)], "Temperature"); // Set default name
 }
-
+/*
+ * Process incoming radio data
+ */
 void checkRadio(){
   // Look for incomming transmissions
   if (radio.receiveDone()) {
@@ -146,9 +151,9 @@ void checkRadio(){
       Serial.print(F("C:")); Serial.println(radio.DATA[1]);
       // Commands from gateway
       switch (radio.DATA[1]) {
-        case 1: send_conf(); break; // Request for registration
-        case 10 ... 16 :
-          mode = radio.DATA[1]; // Auth. commands
+        case 1: sendConf(); break; // Request for registration
+        case 10 ... 16 : // Auth. commands
+          mode = radio.DATA[1];
           // Change keyDelay based on mode, armed or arming allows faster disarm.        
           if (mode == 16) keyDelay = KEY_DELAY;
           else keyDelay = KEY_DELAY_ARMED;
@@ -175,7 +180,21 @@ void checkRadio(){
     }
   }
 }
-
+/*
+ * Send float value to gateway 
+ */
+void sendValue(uint8_t element, float value) {
+  u.fval = value; 
+  msg[0] = conf.reg[(REG_LEN*element)];
+  msg[1] = conf.reg[1+(REG_LEN*element)];
+  msg[2] = conf.reg[2+(REG_LEN*element)];
+  msg[3] = u.b[0]; msg[4] = u.b[1]; msg[5] = u.b[2]; msg[6] = u.b[3];
+  // Send to GW 
+  radio.sendWithRetry(GATEWAYID, msg, 7);
+}
+/*
+ * setup
+ */
 void setup() {
   // Set pins
   pinMode(LED_GREEN, OUTPUT);
@@ -195,22 +214,21 @@ void setup() {
    
   Serial.begin(115200); 
 
-  delay(1000);
-  send_conf(); 
+  sendConf(); 
 
   previousMillis = millis();
   readerMillis   = millis();
   tempMillis     = millis();
   aliveMillis    = millis();
-  
-  //p = iButton; // Do beep at startup
 }
-
+/*
+ * main task
+ */
 void loop() {
-
+  // Process radio data
   checkRadio();
 
-  // Tone and leds
+  // Tone, leds and iButton
   if ((long)(millis() - previousMillis) >= 200) {
     previousMillis = millis();  
     if (*p == '.') {
@@ -253,12 +271,15 @@ void loop() {
           if (iButtonRead == 0) {
             p = iButton; // play
             readerMillis = millis();
+            /*
+            // Print key
             Serial.print(F("Key: "));
             for (uint8_t j = 0; j < 8; j++) {
               Serial.print(addr[j], HEX);
               Serial.print(F(", "));
             }
             Serial.println();
+            */
           }
           iButtonRead++;
           memcpy(&key[0], &addr[0], sizeof(key));
@@ -270,38 +291,31 @@ void loop() {
     if ((unsigned long)(millis() - readerMillis) > keyDelay){
       // We have at least one good key
       if (iButtonRead > 0) {
-        msg[0] = 'K'; 
-        msg[1] = 'i'; 
+        msg[0] = conf.reg[0]; 
+        msg[1] = conf.reg[1];
         // If iButton is held at reader or just touched
-        if (iButtonRead > 4) msg[2] = 1; 
-        else                 msg[2] = 0; 
+        if (iButtonRead > 4) msg[2] = conf.reg[2] + 1;  
+        else                 msg[2] = conf.reg[2] + 0; 
         memcpy(&msg[3], &key[0], sizeof(key));
         // Send        ;
         if (radio.sendWithRetry(GATEWAYID, msg, 11)) {
-          p = keyOK; // play 
+          p = keyOK; // play
         } else {
           p = keyNOK; // play
         }
-        iButtonRead = -1; // Temporarly disable scanning 
+        iButtonRead = -3; // Temporarily disable scanning 
         memset(&key[0], 0x0, sizeof(key)); // Clear the key
       } else {
-        iButtonRead = 0; // Enable scanning
+        if (iButtonRead < 0) iButtonRead++; // Add up to 0, to enable scanning
       }
       readerMillis = millis();
     }
-  } 
+  } // Tone, leds and iButton
 
-  // Sensors readings every SENSOR_DELAY
+  // Temperature readings every SENSOR_DELAY
   if ((long)(millis() - tempMillis) >= SENSOR_DELAY) {
     tempMillis = millis();
-    // Temperature 
-    u.fval = (((float)analogRead(A6) * 0.003223)-0.5)*100; 
-    msg[0] = 'S'; // Sensor
-    msg[1] = 'T'; // Temperature
-    msg[2] = 0;   // local address
-    msg[3] = u.b[0]; msg[4] = u.b[1]; msg[5] = u.b[2]; msg[6] = u.b[3];
-    // Send to GW 
-    radio.sendWithRetry(GATEWAYID, msg, 7);
+    sendValue(1, ((((float)analogRead(A6) * 0.003223)-0.5)*100)); // Send it to GW
   }
 
   // Send alive packet every PING_DELAY
@@ -312,4 +326,5 @@ void loop() {
     // Send to GW 
     radio.sendWithRetry(GATEWAYID, msg, 2);
   }
-}
+  
+}// End main loop
