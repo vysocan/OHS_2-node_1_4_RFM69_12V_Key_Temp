@@ -96,18 +96,23 @@ union u_tag {
  */
 void sendConf(){ 
   int8_t result;
-  Serial.print(F("Conf:"));
+  uint16_t count = 0;
+  
   // Wait some time to avoid contention
   delay(NODEID * 1000);
-  pos = 0; 
-  while (pos < sizeof(conf.reg)) {
+
+  Serial.print(F("Conf:"));
+
+  while (count < sizeof(conf.reg)) {
     msg[0] = 'R'; // Registration flag
-    memcpy(&msg[1], &conf.reg[pos], REG_LEN);    
+    memcpy(&msg[1], &conf.reg[count], REG_LEN);    
     result = radio.sendWithRetry(GATEWAYID, msg, REG_LEN + 1, RADIO_REPEAT);
     Serial.print(F(" ")); Serial.print(result);
-    pos+=REG_LEN;
+    count+=REG_LEN;
   }
+  
   Serial.println(F("."));
+  
   // Play tones to confirm at least last send
   if (result == 1) {
     tone(SPEAKER, notes[0]);  delay(100); tone(SPEAKER, notes[7]);  delay(100); noTone(SPEAKER);
