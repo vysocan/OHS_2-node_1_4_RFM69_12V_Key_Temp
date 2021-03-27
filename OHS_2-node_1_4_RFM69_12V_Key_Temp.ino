@@ -138,6 +138,10 @@ void setDefault(){
   conf.reg[4+(REG_LEN*1)]  = B00011111; // Default setting, group='not set', enabled
   memset(&conf.reg[5+(REG_LEN*1)], 0, NODE_NAME_SIZE);
   strcpy(&conf.reg[5+(REG_LEN*1)], "Temperature"); // Set default name
+
+  eeprom_update_block((const void*)&conf, (void*)0, sizeof(conf)); // Save current configuration 
+  
+  Serial.println(F("Default conf."));
 }
 /*
  * Process incoming radio data
@@ -149,7 +153,7 @@ void checkRadio(){
     if (radio.ACKRequested()) { 
       delay(5); // wait after receive, we need this delay or gateway will not see ACK!!!
       radio.sendACK();
-      Serial.print(F("ACK:"));
+      //Serial.print(F("ACK:"));
     }
     //for (uint8_t ii=0; ii < radioLength; ii++){ Serial.print((char)radio.DATA[ii], HEX); Serial.print("-"); }; Serial.println(F("<"));
     if ((char)radio.DATA[0] == 'C') {
@@ -175,7 +179,7 @@ void checkRadio(){
         pos += REG_LEN; // size of one conf. element
       }
       if (pos < sizeof(conf.reg)) {
-        Serial.println(pos);       
+        Serial.println(pos/REG_LEN); // Show # of updated element        
         memcpy(&conf.reg[pos], &radio.DATA[1], REG_LEN);
         // Save it to EEPROM
         conf.version = VERSION;
@@ -213,12 +217,13 @@ void setup() {
   #ifdef ENABLE_ATC
     radio.enableAutoPower(ATC_RSSI);
   #endif
+
+  Serial.begin(115200); 
+  Serial.println(); Serial.println(F("Start")); 
  
   eeprom_read_block((void*)&conf, (void*)0, sizeof(conf)); // Read current configuration
   if (conf.version != VERSION) setDefault();
-   
-  Serial.begin(115200); 
-
+  
   sendConf(); 
 
   previousMillis = millis();
